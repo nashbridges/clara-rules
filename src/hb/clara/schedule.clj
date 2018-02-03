@@ -27,13 +27,20 @@
       (t/in-days (t/interval start end))
       -1)))
 
-(defrule notify-after-3-days-without-login
-  "When 3 days pass after a login, send a notification"
-  [Login (= ?login-date date)]
+(defrecord LastLogin [date])
+
+(defrule notify-after-3-days-after-last-login
+  "When 3 days pass after last login, send a notification"
+  [LastLogin (= ?login-date date)]
   [Today (= ?today-date date)
          (> (days-between ?login-date ?today-date) 3)]
   =>
   (insert! (->Notification ?today-date)))
+
+(defrule last-login
+  (?login-date <- (acc/max :date) :from [Login])
+  =>
+  (insert! (->LastLogin ?login-date)))
 
 (defquery get-notifications
   []
@@ -87,5 +94,24 @@
               (->Today (datestamp 2018 2 3)))
       (fire-rules)
       (print-notifications))
+
+  ;; But what if the supplier still doesn't log in?
+
+  (-> (mk-session 'hb.clara.schedule)
+      (insert (->Login (datestamp 2018 1 29))
+              (->Today (datestamp 2018 2 2))
+              (->Today (datestamp 2018 2 3))
+              (->Today (datestamp 2018 2 4))
+              (->Today (datestamp 2018 2 5))
+              (->Today (datestamp 2018 2 6))
+              (->Today (datestamp 2018 2 7))
+              (->Today (datestamp 2018 2 8)))
+      (fire-rules)
+      (print-notifications))
   nil)
+
+  ;; Let's not overspam our suppliers.
+  ;;
+  ;; When a supplier does not log in after 3 days in a row,
+  ;; start sending him notifications, but send no more than 5.
 
