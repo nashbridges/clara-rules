@@ -11,7 +11,7 @@
       (tc/to-long)))
 
 ;; When a supplier does not log in after 3 days in a row,
-;; start sending him notifications.
+;; start sending him notifications, but send no more than 5.
 
 (defrecord Today [date])
 
@@ -41,6 +41,27 @@
   (?login-date <- (acc/max :date) :from [Login])
   =>
   (insert! (->LastLogin ?login-date)))
+
+(defrecord NotificationTotal [total])
+
+(defrule notification-total
+  (?total <- (acc/count) :from [Notification])
+  =>
+  (insert! (->NotificationTotal ?total)))
+
+(defrecord LastNotification [date])
+
+(defrule last-notification
+  (?date <- (acc/max :date) :from [Notification])
+  =>
+  (insert! (->LastNotification ?date)))
+
+(defrule no-more-than-5-notifications
+  "Do not send more than 5 notifications in order to not overspam suppliers"
+  [NotificationTotal (> total 5)]
+  [LastNotification (= ?date date)]
+  =>
+  (retract! (->Notification ?date)))
 
 (defquery get-notifications
   []
@@ -95,23 +116,40 @@
       (fire-rules)
       (print-notifications))
 
-  ;; But what if the supplier still doesn't log in?
+  ;; Fifth notification
 
   (-> (mk-session 'hb.clara.schedule)
       (insert (->Login (datestamp 2018 1 29))
-              (->Today (datestamp 2018 2 2))
-              (->Today (datestamp 2018 2 3))
-              (->Today (datestamp 2018 2 4))
-              (->Today (datestamp 2018 2 5))
-              (->Today (datestamp 2018 2 6))
-              (->Today (datestamp 2018 2 7))
-              (->Today (datestamp 2018 2 8)))
+              (->Notification (datestamp 2018 2 2))
+              (->Notification (datestamp 2018 2 3))
+              (->Notification (datestamp 2018 2 4))
+              (->Notification (datestamp 2018 2 5))
+              (->Today (datestamp 2018 2 6)))
+      (fire-rules)
+      (print-notifications))
+
+  ;; Sixth notification
+
+  (-> (mk-session 'hb.clara.schedule)
+      (insert (->Login (datestamp 2018 1 29))
+              (->Notification (datestamp 2018 2 2))
+              (->Notification (datestamp 2018 2 3))
+              (->Notification (datestamp 2018 2 4))
+              (->Notification (datestamp 2018 2 5))
+              (->Notification (datestamp 2018 2 6))
+              (->Today (datestamp 2018 2 7)))
+      (fire-rules)
+      (print-notifications))
+
+  ;; Should send notification only on weekdays
+
+  (-> (mk-session 'hb.clara.schedule)
+      (insert (->Login (datestamp 2018 1 29))
+              (->Today (datestamp 2018 2 3))) ; Saturday
       (fire-rules)
       (print-notifications))
   nil)
 
-  ;; Let's not overspam our suppliers.
-  ;;
-  ;; When a supplier does not log in after 3 days in a row,
-  ;; start sending him notifications, but send no more than 5.
-
+;; When a supplier does not log in after 3 days in a row,
+;; start sending him notifications, but send no more than 5.
+;; Notifications should not be sent on Friday, Saturday and Sunday.
