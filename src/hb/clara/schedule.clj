@@ -10,18 +10,30 @@
   (-> (t/date-time year month day)
       (tc/to-long)))
 
-;; Supplier submits a draft property, but never finishes it.
-;; We need to poke him.
+;; When a supplier does not log in after 3 days in a row,
+;; start sending him notifications.
 
 (defrecord Today [date])
 
 (defrecord Notification [date])
 
-(defrule each-day-notify-the-supplier
-  "Each day send a notification to supplier he should finish updating his draft property"
-  [Today (= ?date date)]
+(defrecord Login [date])
+
+(defn- days-between
+  [start-datestamp end-datestamp]
+  (let [start (tc/from-long start-datestamp)
+        end (tc/from-long end-datestamp)]
+    (if (t/before? start end)
+      (t/in-days (t/interval start end))
+      -1)))
+
+(defrule notify-after-3-days-without-login
+  "When 3 days pass after a login, send a notification"
+  [Login (= ?login-date date)]
+  [Today (= ?today-date date)
+         (> (days-between ?login-date ?today-date) 3)]
   =>
-  (insert! (->Notification ?date)))
+  (insert! (->Notification ?today-date)))
 
 (defquery get-notifications
   []
@@ -31,7 +43,7 @@
   [session]
   (println "Notifications are:")
   (let [notifications
-        (->> (query session get-notifications) ; [{:?notification Notification}, {:?notification Notification},..]
+        (->> (query session get-notifications)
              (map :?notification)
              (sort-by :date))]
     (doseq [notification notifications
@@ -42,13 +54,38 @@
 
 (defn run-examples
   []
+
+  ;; Next day after login
+
   (-> (mk-session 'hb.clara.schedule)
-      (insert (->Today (datestamp 2018 1 29)))
+      (insert (->Login (datestamp 2018 1 29))
+              (->Today (datestamp 2018 1 30)))
+      (fire-rules)
+      (print-notifications))
+
+  ;; Three days after login
+
+  (-> (mk-session 'hb.clara.schedule)
+      (insert (->Login (datestamp 2018 1 29))
+              (->Today (datestamp 2018 2 2)))
+      (fire-rules)
+      (print-notifications))
+
+  ;; Four days after login
+
+  (-> (mk-session 'hb.clara.schedule)
+      (insert (->Login (datestamp 2018 1 29))
+              (->Today (datestamp 2018 2 3)))
+      (fire-rules)
+      (print-notifications))
+
+  ;; But what if there were several logins?
+
+  (-> (mk-session 'hb.clara.schedule)
+      (insert (->Login (datestamp 2018 1 29))
+              (->Login (datestamp 2018 2 1))
+              (->Today (datestamp 2018 2 3)))
       (fire-rules)
       (print-notifications))
   nil)
 
-;; Time for a real task.
-;;
-;; When a supplier does not log in after 3 days in a row,
-;; start sending him notifications.
