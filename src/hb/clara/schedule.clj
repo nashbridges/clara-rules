@@ -13,6 +13,12 @@
 ;; When a supplier does not log in after 3 days in a row,
 ;; start sending him notifications, but send no more than 5.
 ;; Notifications should not be sent on Friday, Saturday and Sunday.
+;; Notifcations should be sent as
+;;   type A
+;;   type B
+;;   type A
+;;   type B
+;;   type A
 
 (defrecord Today [date])
 
@@ -78,22 +84,80 @@
   =>
   (retract! (->Notification ?date)))
 
-(defquery get-notifications
+(defrecord NotificationA [date])
+(defrecord NotificationB [date])
+
+(defrule notification-a-first
+  "First notification should be of type A"
+  [Notification (= ?date date)]
+  [:not [NotificationA]]
+  =>
+  (insert-unconditional! (->NotificationA ?date)))
+
+(defrule notification-b-second
+  "Second notification should be of type B"
+  [Notification (= ?date date)]
+  [NotificationA (> ?date date)]
+  [:not [NotificationB]]
+  =>
+  (insert-unconditional! (->NotificationB ?date)))
+
+(defrecord LastNotificationA [date])
+(defrecord LastNotificationB [date])
+
+(defrule last-notification-a
+  (?date <- (acc/max :date) :from [NotificationA])
+  =>
+  (insert-unconditional! (->LastNotificationA ?date)))
+
+(defrule last-notification-b
+  (?date <- (acc/max :date) :from [NotificationB])
+  =>
+  (insert-unconditional! (->LastNotificationB ?date)))
+
+(defrule notification-a-after-b
+  "Notification A should be after one of type B"
+  [Notification (= ?date date)]
+  [LastNotificationA (= ?a-date date)
+                     (> ?date ?a-date)]
+  [LastNotificationB (= ?b-date date)
+                     (> ?date ?b-date)
+                     (< ?a-date ?b-date)]
+  =>
+  (insert! (->NotificationA ?date)))
+
+(defrule notification-b-after-a
+  "Notification B should be after one of type A"
+  [Notification (= ?date date)]
+  [LastNotificationA (= ?a-date date)
+                     (> ?date ?a-date)]
+  [LastNotificationB (= ?b-date date)
+                     (> ?date ?b-date)
+                     (> ?a-date ?b-date)]
+  =>
+  (insert! (->NotificationB ?date)))
+
+(defquery get-notifications-a
   []
-  [?notification <- Notification])
+  [?notification <- NotificationA])
+
+(defquery get-notifications-b
+  []
+  [?notification <- NotificationB])
 
 (defn print-notifications
   [session]
   (println "Notifications are:")
   (let [notifications
-        (->> (query session get-notifications)
+        (->> (concat (query session get-notifications-a) (query session get-notifications-b))
              (map :?notification)
              (sort-by :date))]
     (doseq [notification notifications
             :let [{datestamp :date} notification
                   date (tc/from-long datestamp)
-                  formatted-date (tf/unparse (tf/formatters :year-month-day) date)]]
-      (println "Notification at" formatted-date))))
+                  formatted-date (tf/unparse (tf/formatters :year-month-day) date)
+                  notification-type (if (= (type notification) NotificationA) "A" "B")]]
+      (println "Notification" notification-type "at" formatted-date))))
 
 (defn run-examples
   []
@@ -138,14 +202,44 @@
       (fire-rules)
       (print-notifications))
 
+  ;; Seven days after login (it's Tuesday)
+
+  (-> (mk-session 'hb.clara.schedule)
+      (insert (->Login (datestamp 2018 1 29))
+              (->NotificationA (datestamp 2018 2 5))
+              (->Today (datestamp 2018 2 6)))
+      (fire-rules)
+      (print-notifications))
+
+  ;; Eight days after login (it's Wednesday)
+
+  (-> (mk-session 'hb.clara.schedule)
+      (insert (->Login (datestamp 2018 1 29))
+              (->NotificationA (datestamp 2018 2 5))
+              (->NotificationB (datestamp 2018 2 6))
+              (->Today (datestamp 2018 2 7)))
+      (fire-rules)
+      (print-notifications))
+
+  ;; Nine days after login (it's Thursday)
+
+  (-> (mk-session 'hb.clara.schedule)
+      (insert (->Login (datestamp 2018 1 29))
+              (->NotificationA (datestamp 2018 2 5))
+              (->NotificationB (datestamp 2018 2 6))
+              (->NotificationA (datestamp 2018 2 7))
+              (->Today (datestamp 2018 2 8)))
+      (fire-rules)
+      (print-notifications))
+
   ;; Fifth notification (but it's on Friday)
 
   (-> (mk-session 'hb.clara.schedule)
       (insert (->Login (datestamp 2018 1 25))
-              (->Notification (datestamp 2018 1 29))
-              (->Notification (datestamp 2018 1 30))
-              (->Notification (datestamp 2018 1 31))
-              (->Notification (datestamp 2018 2 1))
+              (->NotificationA (datestamp 2018 1 29))
+              (->NotificationB (datestamp 2018 1 30))
+              (->NotificationA (datestamp 2018 1 31))
+              (->NotificationB (datestamp 2018 2 1))
               (->Today (datestamp 2018 2 2)))
       (fire-rules)
       (print-notifications))
@@ -154,10 +248,10 @@
 
   (-> (mk-session 'hb.clara.schedule)
       (insert (->Login (datestamp 2018 1 25))
-              (->Notification (datestamp 2018 1 29))
-              (->Notification (datestamp 2018 1 30))
-              (->Notification (datestamp 2018 1 31))
-              (->Notification (datestamp 2018 2 1))
+              (->NotificationA (datestamp 2018 1 29))
+              (->NotificationB (datestamp 2018 1 30))
+              (->NotificationA (datestamp 2018 1 31))
+              (->NotificationB (datestamp 2018 2 1))
               (->Today (datestamp 2018 2 5)))
       (fire-rules)
       (print-notifications))
@@ -166,22 +260,12 @@
 
   (-> (mk-session 'hb.clara.schedule)
       (insert (->Login (datestamp 2018 1 25))
-              (->Notification (datestamp 2018 1 29))
-              (->Notification (datestamp 2018 1 30))
-              (->Notification (datestamp 2018 1 31))
-              (->Notification (datestamp 2018 2 1))
-              (->Notification (datestamp 2018 2 5))
+              (->NotificationA (datestamp 2018 1 29))
+              (->NotificationB (datestamp 2018 1 30))
+              (->NotificationA (datestamp 2018 1 31))
+              (->NotificationB (datestamp 2018 2 1))
+              (->NotificationA (datestamp 2018 2 5))
               (->Today (datestamp 2018 2 6)))
       (fire-rules)
       (print-notifications))
   nil)
-
-;; When a supplier does not log in after 3 days in a row,
-;; start sending him notifications, but send no more than 5.
-;; Notifications should not be sent on Friday, Saturday and Sunday.
-;; Notifcations should be sent as
-;;   type A
-;;   type B
-;;   type A
-;;   type B
-;;   type A
