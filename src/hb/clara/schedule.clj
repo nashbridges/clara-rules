@@ -12,6 +12,7 @@
 
 ;; When a supplier does not log in after 3 days in a row,
 ;; start sending him notifications, but send no more than 5.
+;; Notifications should not be sent on Friday, Saturday and Sunday.
 
 (defrecord Today [date])
 
@@ -29,11 +30,25 @@
 
 (defrecord LastLogin [date])
 
-(defrule notify-after-3-days-after-last-login
-  "When 3 days pass after last login, send a notification"
+(defrecord Weekday [date])
+
+(defn- weekday?
+  [datestamp]
+  (let [date (tc/from-long datestamp)]
+    (#{1 2 3 4} (t/day-of-week date))))
+
+(defrule weekday
+  "Weekday is any day except Friday, Saturday and Sunday"
+  [Today (= ?date date)
+         (weekday? ?date)]
+  =>
+  (insert! (->Weekday ?date)))
+
+(defrule on-weekday-notify-after-3-days-after-last-login
+  "When 3 days pass after last login, send a notification on a weekday"
   [LastLogin (= ?login-date date)]
-  [Today (= ?today-date date)
-         (> (days-between ?login-date ?today-date) 3)]
+  [Weekday (= ?today-date date)
+           (> (days-between ?login-date ?today-date) 3)]
   =>
   (insert! (->Notification ?today-date)))
 
@@ -91,7 +106,7 @@
       (fire-rules)
       (print-notifications))
 
-  ;; Three days after login
+  ;; Three days after login (but it's Friday)
 
   (-> (mk-session 'hb.clara.schedule)
       (insert (->Login (datestamp 2018 1 29))
@@ -99,7 +114,7 @@
       (fire-rules)
       (print-notifications))
 
-  ;; Four days after login
+  ;; Four days after login (but it's Saturday)
 
   (-> (mk-session 'hb.clara.schedule)
       (insert (->Login (datestamp 2018 1 29))
@@ -107,45 +122,56 @@
       (fire-rules)
       (print-notifications))
 
-  ;; But what if there were several logins?
+  ;; Five days after login (but it's Sunday)
 
   (-> (mk-session 'hb.clara.schedule)
       (insert (->Login (datestamp 2018 1 29))
-              (->Login (datestamp 2018 2 1))
-              (->Today (datestamp 2018 2 3)))
+              (->Today (datestamp 2018 2 4)))
       (fire-rules)
       (print-notifications))
 
-  ;; Fifth notification
+  ;; Six days after login (it's Monday)
 
   (-> (mk-session 'hb.clara.schedule)
       (insert (->Login (datestamp 2018 1 29))
-              (->Notification (datestamp 2018 2 2))
-              (->Notification (datestamp 2018 2 3))
-              (->Notification (datestamp 2018 2 4))
+              (->Today (datestamp 2018 2 5)))
+      (fire-rules)
+      (print-notifications))
+
+  ;; Fifth notification (but it's on Friday)
+
+  (-> (mk-session 'hb.clara.schedule)
+      (insert (->Login (datestamp 2018 1 25))
+              (->Notification (datestamp 2018 1 29))
+              (->Notification (datestamp 2018 1 30))
+              (->Notification (datestamp 2018 1 31))
+              (->Notification (datestamp 2018 2 1))
+              (->Today (datestamp 2018 2 2)))
+      (fire-rules)
+      (print-notifications))
+
+  ;; Fifth notification (it's on Monday)
+
+  (-> (mk-session 'hb.clara.schedule)
+      (insert (->Login (datestamp 2018 1 25))
+              (->Notification (datestamp 2018 1 29))
+              (->Notification (datestamp 2018 1 30))
+              (->Notification (datestamp 2018 1 31))
+              (->Notification (datestamp 2018 2 1))
+              (->Today (datestamp 2018 2 5)))
+      (fire-rules)
+      (print-notifications))
+
+  ;; Sixth notification (on Tuesday)
+
+  (-> (mk-session 'hb.clara.schedule)
+      (insert (->Login (datestamp 2018 1 25))
+              (->Notification (datestamp 2018 1 29))
+              (->Notification (datestamp 2018 1 30))
+              (->Notification (datestamp 2018 1 31))
+              (->Notification (datestamp 2018 2 1))
               (->Notification (datestamp 2018 2 5))
               (->Today (datestamp 2018 2 6)))
-      (fire-rules)
-      (print-notifications))
-
-  ;; Sixth notification
-
-  (-> (mk-session 'hb.clara.schedule)
-      (insert (->Login (datestamp 2018 1 29))
-              (->Notification (datestamp 2018 2 2))
-              (->Notification (datestamp 2018 2 3))
-              (->Notification (datestamp 2018 2 4))
-              (->Notification (datestamp 2018 2 5))
-              (->Notification (datestamp 2018 2 6))
-              (->Today (datestamp 2018 2 7)))
-      (fire-rules)
-      (print-notifications))
-
-  ;; Should send notification only on weekdays
-
-  (-> (mk-session 'hb.clara.schedule)
-      (insert (->Login (datestamp 2018 1 29))
-              (->Today (datestamp 2018 2 3))) ; Saturday
       (fire-rules)
       (print-notifications))
   nil)
@@ -153,3 +179,9 @@
 ;; When a supplier does not log in after 3 days in a row,
 ;; start sending him notifications, but send no more than 5.
 ;; Notifications should not be sent on Friday, Saturday and Sunday.
+;; Notifcations should be sent as
+;;   type A
+;;   type B
+;;   type A
+;;   type B
+;;   type A
